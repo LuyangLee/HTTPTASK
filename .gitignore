@@ -1,6 +1,6 @@
 # ignore some files
-/*.exe
-/*.docx
-/*.doc
-/*.vscode/
-/*.out
+*.exe
+*.docx
+*.doc
+*.vscode/
+*.out
