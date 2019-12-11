@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <stddef.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -85,16 +86,52 @@ typedef union {
 
 
 /* 处理get和post的回调方法 */
+// GET方法中的查询字符串（键值对）实际上是从URI中获得的
 void deal_get(struct evhttp_request *req, void *args)
 {
     // deal GET request, callback function
     // show request information and send response message
-
-
+    // for example : /test?name1=value1&name2=value2
+    // pay attention: if you use curl,'&' is a kind of specific command
+    struct evbuffer *evb = evbuffer_new();
+    if (!evb)
+    {
+        fprintf(stderr, "Couldn't create buffer\n");
+        return;
+    }
+    const char *uri = evhttp_request_get_uri(req);
+    // kvs是一个的队列，用来存储uri解析后的键-值对,先判断是否是badrequest
+    struct evkeyvalq kvs;
+    if (evhttp_parse_query(uri,&kvs) != 0)
+    {
+        printf("It's a bad uri. BADREQUEST\n");
+        evhttp_send_error(req, HTTP_BADREQUEST, 0);
+        return;
+    }
+    evbuffer_add_printf(evb, "You have sent a GET request to the server\r\n");
+    evbuffer_add_printf(evb, "Request URI: %s\r\n", uri);
+    for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
+    {
+        evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
+    }
+    evhttp_send_reply(req, HTTP_OK, "OK", evb);
+    if(evb)
+        evbuffer_free(evb);
 }
 
 void deal_post(struct evhttp_request *req, void *args)
-{
+{   
+    struct evbuffer *evb = evbuffer_new();
+    if (!evb)
+    {
+        fprintf(stderr, "Couldn't create buffer\n");
+        return;
+    }
+    // put data and uri into intergrated
+    size_t origin_uri_size = strlen(evhttp_request_get_uri(req))
+    size_t data_size = EVBUFFER_LENGTH(evhttp_request_get_input_buffer(req))
+    size_t real_uri_size = origin_uri_size + data_size
+
 
 }
 /*文件上传和下载函数实现*/
@@ -109,74 +146,74 @@ void do_download_file(struct evhttp_request *req, void *args)
 }
 
 
-static void
-send_document_cb(struct evhttp_request *req, void *arg)
-{
-    struct evbuffer *evb = NULL;
-    //获取请求的uri,处理请求的类型:GET、POST、其他
-    const char *uri = evhttp_request_get_uri(req); 
-    struct evhttp_uri *decoded = NULL;
-    const char* path = NULL;
-    char *decoded_path = NULL;
-    char *whole_path = NULL;
+// static void
+// send_document_cb(struct evhttp_request *req, void *arg)
+// {
+//     struct evbuffer *evb = NULL;
+//     //获取请求的uri,处理请求的类型:GET、POST、其他
+//     const char *uri = evhttp_request_get_uri(req); 
+//     struct evhttp_uri *decoded = NULL;
+//     const char* path = NULL;
+//     char *decoded_path = NULL;
+//     char *whole_path = NULL;
 
-    if (evhttp_request_get_command(req) == EVHTTP_REQ_GET)
-    { //curl -k  https://localhost:8421/会跳转至该函数进行执行然后return
-        struct evbuffer *buf = evbuffer_new();
-        if (buf == NULL)
-            return;
-        evbuffer_add_printf(buf, "Requested: %s\n", uri);
-        evhttp_send_reply(req, HTTP_OK, "OK", buf);
-        return;
-    }
+//     if (evhttp_request_get_command(req) == EVHTTP_REQ_GET)
+//     { //curl -k  https://localhost:8421/会跳转至该函数进行执行然后return
+//         struct evbuffer *buf = evbuffer_new();
+//         if (buf == NULL)
+//             return;
+//         evbuffer_add_printf(buf, "Requested: %s\n", uri);
+//         evhttp_send_reply(req, HTTP_OK, "OK", buf);
+//         return;
+//     }
 
-    /* We only handle POST requests. */
-    if (evhttp_request_get_command(req) != EVHTTP_REQ_POST)
-    {
-        evhttp_send_reply(req, 200, "OK", NULL);
-        return;
-    }
+//     /* We only handle POST requests. */
+//     if (evhttp_request_get_command(req) != EVHTTP_REQ_POST)
+//     {
+//         evhttp_send_reply(req, 200, "OK", NULL);
+//         return;
+//     }
 
-    printf("Got a POST request for <%s>\n", uri);
+//     printf("Got a POST request for <%s>\n", uri);
 
-    //将uri分段为各个部分,当uri存在err，evhttp_uri_parse返回NULL
-    decoded = evhttp_uri_parse(uri); 
-    if (!decoded)                                       
-    {
-        printf("It's not a good URI. Sending BADREQUEST\n");
-        evhttp_send_error(req, HTTP_BADREQUEST, 0);
-        return;
-    }
-    /*通过解析uri在以下部分完成请求判断*/
-    //printf("Path=%s",decoded->path);
-    //.......
+//     //将uri分段为各个部分,当uri存在err，evhttp_uri_parse返回NULL
+//     decoded = evhttp_uri_parse(uri); 
+//     if (!decoded)                                       
+//     {
+//         printf("It's not a good URI. Sending BADREQUEST\n");
+//         evhttp_send_error(req, HTTP_BADREQUEST, 0);
+//         return;
+//     }
+//     /*通过解析uri在以下部分完成请求判断*/
+//     //printf("Path=%s",decoded->path);
+//     //.......
 
-    /* Decode the payload */
-    //kv为一个evkeyval队列,key-value queue(队列结构)，主要用来保存HTTP headers
-    //也可以被用来保存parse uri参数的结果
-    struct evkeyvalq kv ;
-    struct evbuffer *buff = evbuffer_new();
-    memset(&kv, 0, sizeof(kv)); //清空缓冲队列，全部置0
+//     /* Decode the payload */
+//     //kv为一个evkeyval队列,key-value queue(队列结构)，主要用来保存HTTP headers
+//     //也可以被用来保存parse uri参数的结果
+//     struct evkeyvalq kv ;
+//     struct evbuffer *buff = evbuffer_new();
+//     memset(&kv, 0, sizeof(kv)); //清空缓冲队列，全部置0
 
-    if (0 != evhttp_parse_query(buff, &kv)) //Helper函数可从HTTP URI的查询部分中解析出参数
-    {
-        printf("Malformed payload. Sending BADREQUEST\n");
-        evhttp_send_error(req, HTTP_BADREQUEST, 0);
-        return;
-    }
-    evbuffer_add_printf(buff, "You have sent a POST request to the server\r\n");
-    evbuffer_add_printf(buff, "Request URI: %s\r\n", evhttp_request_get_uri(req));
-    for (struct evkeyval *head = kv.tqh_first; head != NULL; head = head->next.tqe_next)
-    {
-        evbuffer_add_printf(buff, "%s=%s\n", head->key, head->value);
-    }
+//     if (0 != evhttp_parse_query(buff, &kv)) //Helper函数可从HTTP URI的查询部分中解析出参数
+//     {
+//         printf("Malformed payload. Sending BADREQUEST\n");
+//         evhttp_send_error(req, HTTP_BADREQUEST, 0);
+//         return;
+//     }
+//     evbuffer_add_printf(buff, "You have sent a POST request to the server\r\n");
+//     evbuffer_add_printf(buff, "Request URI: %s\r\n", evhttp_request_get_uri(req));
+//     for (struct evkeyval *head = kv.tqh_first; head != NULL; head = head->next.tqe_next)
+//     {
+//         evbuffer_add_printf(buff, "%s=%s\n", head->key, head->value);
+//     }
 
-    evhttp_send_reply(req, 200, "OK", buff);
-    if (decoded)
-        evhttp_uri_free(decoded);
-    if (buff)
-        evbuffer_free(buff);
-}
+//     evhttp_send_reply(req, 200, "OK", buff);
+//     if (decoded)
+//         evhttp_uri_free(decoded);
+//     if (buff)
+//         evbuffer_free(buff);
+// }
 
 /**
  * This callback is responsible for creating a new SSL connection
@@ -317,10 +354,10 @@ static int serve_some_http(void)
     server_setup_certs(ctx, certificate_chain, private_key);
 
     /* This is the magic that lets evhttp use SSL. */
-    evhttp_set_bevcb(http, bevcb, ctx);
+    // evhttp_set_bevcb(http, bevcb, ctx);
 
     /* This is the callback that gets called when a request comes in. */
-    evhttp_set_gencb(http, send_document_cb, NULL);
+    evhttp_set_gencb(http, deal_get, NULL);
 
     /* Now we tell the evhttp what port to listen on */
     //设置监听端口
