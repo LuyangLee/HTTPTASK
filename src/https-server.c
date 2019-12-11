@@ -235,8 +235,10 @@ static int display_listen_sock(struct evhttp_bound_socket* handle)
     addr = evutil_inet_ntop(ss.ss.ss_family, inaddr, addrbuf,
                             sizeof(addrbuf));
     if (addr)
+    {
         printf("Listening on %s:%d\n", addr, got_port);
         evutil_snprintf(uri_root, sizeof(uri_root),"http://%s:%d",addr,got_port);
+    }
     else
     {
         fprintf(stderr, "evutil_inet_ntop failed\n");
