@@ -68,7 +68,7 @@
 #endif
 
 unsigned short serverPort = COMMON_HTTPS_PORT;
-
+char uri_root[512];
 /* Instead of casting between these types, create a union with all of them,
  * to avoid -Wstrict-aliasing warnings. */
 typedef union {
@@ -198,13 +198,60 @@ static void server_setup_certs(SSL_CTX *ctx,
         die_most_horribly_from_openssl_error("SSL_CTX_check_private_key");
 }
 
+// Extract and display the address we're listening on.
+// 创建监听端口
+static int display_listen_sock(struct evhttp_bound_socket* handle)
+{ 
+    sock_hop ss;
+    evutil_socket_t fd;
+    ev_socklen_t socklen = sizeof(ss);
+    char addrbuf[128];
+    void *inaddr;
+    const char *addr;
+    int got_port = -1;
+    fd = evhttp_bound_socket_get_fd(handle);
+    memset(&ss, 0, sizeof(ss));
+    if (getsockname(fd, &ss.sa, &socklen))
+    {
+        perror("getsockname() failed");
+        return 1;
+    }
+    // 判断v4还是v6
+    if (ss.ss.ss_family == AF_INET)
+    {
+        got_port = ntohs(ss.in.sin_port);
+        inaddr = &ss.in.sin_addr;
+    }
+    else if (ss.ss.ss_family == AF_INET6)
+    {
+        got_port = ntohs(ss.i6.sin6_port);
+        inaddr = &ss.i6.sin6_addr;
+    }
+    else
+    {
+        fprintf(stderr, "Weird address family %d\n", ss.ss.ss_family);
+        return 1;
+    }
+    addr = evutil_inet_ntop(ss.ss.ss_family, inaddr, addrbuf,
+                            sizeof(addrbuf));
+    if (addr)
+        printf("Listening on %s:%d\n", addr, got_port);
+        evutil_snprintf(uri_root, sizeof(uri_root),"http://%s:%d",addr,got_port);
+    else
+    {
+        fprintf(stderr, "evutil_inet_ntop failed\n");
+        return 1;
+    }
+    return 0;
+}
 static int serve_some_http(void)
 {
     struct event_base *base;
     struct evhttp *http;
     struct evhttp_bound_socket *handle;
-    int ret = 0;
     base = event_base_new();
+    // TODO:there should be err deal(if the latter function is wrong, the former should stop its connection)
+    // TODO:ret
     if (!base)
     {
         fprintf(stderr, "Couldn't create an event_base: exiting\n");
@@ -235,8 +282,8 @@ static int serve_some_http(void)
         die_most_horribly_from_openssl_error("SSL_CTX_set_tmp_ecdh");
 
     /* Find and set up our server certificate. */
-    const char *certificate_chain = "server-certificate-chain.pem"; //证书链
-    const char *private_key = "server-private-key.pem";             //私钥
+    const char *certificate_chain = "../keys/server-certificate-chain.pem"; //证书链
+    const char *private_key = "../keys/server-private-key.pem";             //私钥
     server_setup_certs(ctx, certificate_chain, private_key);
 
     /* This is the magic that lets evhttp use SSL. */
@@ -250,50 +297,13 @@ static int serve_some_http(void)
     handle = evhttp_bind_socket_with_handle(http, "0.0.0.0", serverPort);
     if (!handle)
     {
-        fprintf(stderr, "couldn't bind to port %d. Exiting.\n",
-                (int)serverPort);
+        fprintf(stderr, "couldn't bind to port %d. Exiting.\n",serverPort);
         return 1;
     }
-    { // Extract and display the address we're listening on.
-        sock_hop ss;
-        evutil_socket_t fd;
-        ev_socklen_t socklen = sizeof(ss);
-        char addrbuf[128];
-        void *inaddr;
-        const char *addr;
-        int got_port = -1;
-        fd = evhttp_bound_socket_get_fd(handle);
-        memset(&ss, 0, sizeof(ss));
-        if (getsockname(fd, &ss.sa, &socklen))
-        {
-            perror("getsockname() failed");
-            return 1;
-        }
-        if (ss.ss.ss_family == AF_INET)
-        {
-            got_port = ntohs(ss.in.sin_port);
-            inaddr = &ss.in.sin_addr;
-        }
-        else if (ss.ss.ss_family == AF_INET6)
-        {
-            got_port = ntohs(ss.i6.sin6_port);
-            inaddr = &ss.i6.sin6_addr;
-        }
-        else
-        {
-            fprintf(stderr, "Weird address family %d\n", ss.ss.ss_family);
-            return 1;
-        }
-        addr = evutil_inet_ntop(ss.ss.ss_family, inaddr, addrbuf,
-                                sizeof(addrbuf));
-        if (addr)
-            printf("Listening on %s:%d\n", addr, got_port);
-        else
-        {
-            fprintf(stderr, "evutil_inet_ntop failed\n");
-            return 1;
-        }
-    }
+    if (display_listen_sock(handle)) {
+		return  1;
+	}
+    
     event_base_dispatch(base);
     /* not reached; runs forever */
     return 0;

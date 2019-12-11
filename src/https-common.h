@@ -7,7 +7,7 @@
 /**
  * Rather than using the standard https port of 443, use this one.
  */
-#define COMMON_HTTPS_PORT 8421
+#define COMMON_HTTPS_PORT 8800
 
 /**
  * This is the string the client tells the server in the POST request.
