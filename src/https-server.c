@@ -83,6 +83,20 @@ typedef union {
  * it must eventually call evhttp_send_error() or evhttp_send_reply().
  */
 
+
+/* 处理get和post的回调方法 */
+void deal_get(struct evhttp_request *req, void *args)
+{
+    // deal GET request, callback function
+    // show request information and send response message
+
+
+}
+
+void deal_post(struct evhttp_request *req, void *args)
+{
+
+}
 /*文件上传和下载函数实现*/
 void do_upload_file(struct evhttp_request *req, void *args)
 {
@@ -90,14 +104,22 @@ void do_upload_file(struct evhttp_request *req, void *args)
 
 void do_download_file(struct evhttp_request *req, void *args)
 {
+    // Download Format: http://localhost:8800/download/index.html
+
 }
+
 
 static void
 send_document_cb(struct evhttp_request *req, void *arg)
 {
     struct evbuffer *evb = NULL;
-    const char *uri = evhttp_request_get_uri(req); //获取请求的uri
-                                                   //处理请求的类型:GET、POST、其他
+    //获取请求的uri,处理请求的类型:GET、POST、其他
+    const char *uri = evhttp_request_get_uri(req); 
+    struct evhttp_uri *decoded = NULL;
+    const char* path = NULL;
+    char *decoded_path = NULL;
+    char *whole_path = NULL;
+
     if (evhttp_request_get_command(req) == EVHTTP_REQ_GET)
     { //curl -k  https://localhost:8421/会跳转至该函数进行执行然后return
         struct evbuffer *buf = evbuffer_new();
@@ -117,10 +139,9 @@ send_document_cb(struct evhttp_request *req, void *arg)
 
     printf("Got a POST request for <%s>\n", uri);
 
-    /* uri的解析应该使用该函数来进行，但是并未完全理解，还需尝试
-  Decode the URI */
-    struct evhttp_uri *decoded = evhttp_uri_parse(uri); //将uri分段为各个部分
-    if (!decoded)                                       //当uri存在err，evhttp_uri_parse返回NULL
+    //将uri分段为各个部分,当uri存在err，evhttp_uri_parse返回NULL
+    decoded = evhttp_uri_parse(uri); 
+    if (!decoded)                                       
     {
         printf("It's not a good URI. Sending BADREQUEST\n");
         evhttp_send_error(req, HTTP_BADREQUEST, 0);
@@ -133,7 +154,7 @@ send_document_cb(struct evhttp_request *req, void *arg)
     /* Decode the payload */
     //kv为一个evkeyval队列,key-value queue(队列结构)，主要用来保存HTTP headers
     //也可以被用来保存parse uri参数的结果
-    struct evkeyvalq kv;
+    struct evkeyvalq kv ;
     struct evbuffer *buff = evbuffer_new();
     memset(&kv, 0, sizeof(kv)); //清空缓冲队列，全部置0
 
@@ -246,25 +267,32 @@ static int display_listen_sock(struct evhttp_bound_socket* handle)
     }
     return 0;
 }
+
+void stop_connect(struct event_base*base, struct evhttp*http)
+{
+    if(http)
+        evhttp_free(http);
+    if(base)
+        event_base_free(base);
+}
+
 static int serve_some_http(void)
 {
-    struct event_base *base;
-    struct evhttp *http;
-    struct evhttp_bound_socket *handle;
+    struct event_base *base = NULL;
+    struct evhttp *http = NULL;
+    struct evhttp_bound_socket *handle = NULL;
     base = event_base_new();
-    // TODO:there should be err deal(if the latter function is wrong, the former should stop its connection)
-    // TODO:ret
     if (!base)
     {
         fprintf(stderr, "Couldn't create an event_base: exiting\n");
         return 1;
     }
-
     /* Create a new evhttp object to handle requests. */
     http = evhttp_new(base);
     if (!http)
     {
         fprintf(stderr, "couldn't create evhttp. Exiting.\n");
+        stop_connect(base, http);
         return 1;
     }
 
@@ -300,9 +328,11 @@ static int serve_some_http(void)
     if (!handle)
     {
         fprintf(stderr, "couldn't bind to port %d. Exiting.\n",serverPort);
+        stop_connect(base, http);
         return 1;
     }
     if (display_listen_sock(handle)) {
+        stop_connect(base, http);
 		return  1;
 	}
     
