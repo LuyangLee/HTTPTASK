@@ -22,6 +22,7 @@
 #include <limits.h>
 #include <stddef.h>
 
+
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -128,6 +129,8 @@ void deal_get(struct evhttp_request *req, void *args)
         evbuffer_free(evb);
 }
 
+// 处理post请求,这里目前针对content-type 为x-www-form-urlencoded编码格式的请求，其他格式认为是不好的请求
+// TODO: analyse different types of the post body(such as form-data)
 void deal_post(struct evhttp_request *req, void *args)
 {
     //TODO: segment fault when dealing with post upload
@@ -148,14 +151,16 @@ void deal_post(struct evhttp_request *req, void *args)
     memset(uri, 0, real_uri_size);
     if (data_size != 0)
     {
-        memcpy(data, EVBUFFER_DATA(evhttp_request_get_input_buffer), data_size);
+        memcpy(data, EVBUFFER_DATA(evhttp_request_get_input_buffer(req)), data_size);
         snprintf(uri,real_uri_size,"%s?%s",evhttp_request_get_uri(req), data);
+        uri[real_uri_size - 2] = '\0';
     }
     else
     {
         memcpy(uri,evhttp_request_get_uri(req),origin_uri_size); 
     }
     struct evkeyvalq kvs;
+    // printf("%s",uri);
     if (evhttp_parse_query(uri,&kvs) != 0)
     {
         printf("It's a bad uri. BADREQUEST\n");
@@ -498,6 +503,5 @@ int main(int argc, char **argv)
     }
 
     /* now run http server (never returns) */
-    printf("%s","hhhhhhhhhhh");
     return serve_some_http();
 }
