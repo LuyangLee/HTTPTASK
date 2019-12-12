@@ -53,6 +53,7 @@
 #include <event2/buffer.h>
 #include <event2/util.h>
 #include <event2/keyvalq_struct.h>
+#include "template.h"
 
 #ifdef EVENT__HAVE_NETINET_IN_H
 #include <netinet/in.h>
@@ -84,7 +85,8 @@ typedef union {
  * any other callback.  Like any evhttp server callback, it has a simple job:
  * it must eventually call evhttp_send_error() or evhttp_send_reply().
  */
-
+void upload_get();
+void upload_post();
 
 // 处理get和post的回调方法 //
 // GET方法中的查询字符串（键值对）实际上是从URI中获得的
@@ -111,6 +113,12 @@ void deal_get(struct evhttp_request *req, void *args)
     }
     evbuffer_add_printf(evb, "You have sent a GET request to the server\r\n");
     evbuffer_add_printf(evb, "Request URI: %s\r\n", uri);
+    //upload
+    char * beginwith = strstr(uri, "/upload");
+    if (beginwith == uri){
+        upload_get(req,args);
+    }//upload end
+
     for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
     {
         evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
@@ -181,9 +189,20 @@ void dump(struct evhttp_request *req, void *args)
         evbuffer_free(evb);
 }
 
-/*文件上传和下载函数实现*/
-void do_upload_file(struct evhttp_request *req, void *args)
-{
+
+void upload_get(struct evhttp_request *req, void *args){
+    struct evbuffer *evb = evbuffer_new();
+    if (!evb)
+    {
+        fprintf(stderr, "Couldn't create buffer\n");
+        return;
+    }
+    evbuffer_add_printf(evb, UPLOAD_HTML_TEMPLATE);
+    evhttp_send_reply(req, HTTP_OK, "OK", evb);
+    evbuffer_free(evb);
+}
+
+void upload_post(){
 
 }
 
