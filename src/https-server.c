@@ -85,8 +85,8 @@ typedef union {
  * any other callback.  Like any evhttp server callback, it has a simple job:
  * it must eventually call evhttp_send_error() or evhttp_send_reply().
  */
-void upload_get();
-void upload_post();
+void upload_get(struct evhttp_request *req, void *args);
+void upload_post(struct evhttp_request *req, void *args);
 
 // 处理get和post的回调方法 //
 // GET方法中的查询字符串（键值对）实际上是从URI中获得的
@@ -129,7 +129,8 @@ void deal_get(struct evhttp_request *req, void *args)
 }
 
 void deal_post(struct evhttp_request *req, void *args)
-{   
+{
+    //TODO: segment fault when dealing with post upload
     struct evbuffer *evb = evbuffer_new();
     
     if (!evb)
