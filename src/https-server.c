@@ -1,20 +1,3 @@
-/* Derived from sample/http-server.c in libevent source tree.
- * That file does not have a license notice, but generally libevent
- * is under the 3-clause BSD.
- *
- * Plus, some additional inspiration from:
- * http://archives.seul.org/libevent/users/Jul-2010/binGK8dlinMqP.bin
- * (which is a .c file despite the extension and mime type) */
-
-/*
-  A trivial https webserver using Libevent's evhttp.
-
-  This is not the best code in the world, and it does some fairly stupid stuff
-  that you would never want to do in a production webserver. Caveat hackor!
-
- */
-
-#include "https-common.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,10 +5,8 @@
 #include <limits.h>
 #include <stddef.h>
 
-
 #include <sys/types.h>
 #include <sys/stat.h>
-
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -54,6 +35,7 @@
 #include <event2/buffer.h>
 #include <event2/util.h>
 #include <event2/keyvalq_struct.h>
+#include "https-common.h"
 #include "template.h"
 
 #ifdef EVENT__HAVE_NETINET_IN_H
@@ -70,8 +52,9 @@
 #define O_RDONLY _O_RDONLY
 #endif
 
-#define DOWNLOADFILEHOME "../file/"
+#define DOWNLOADFILEHOME "./file/"
 #define MaxFileNameLen 100
+#define HTTP_FORBIDDEN 403
 unsigned short serverPort = COMMON_HTTPS_PORT;
 char uri_root[512];
 /* Instead of casting between these types, create a union with all of them,
@@ -92,9 +75,12 @@ void deal_post(struct evhttp_request *req, void *args);
 void dump(struct evhttp_request *req, void *args);
 void upload_get(struct evhttp_request *req, void *args);
 void upload_post(struct evhttp_request *req, void *args);
-int get_filename(const char* uri, char *file);
 void do_download_file(struct evhttp_request *req, void *args);
 void general_dispatch(struct evhttp_request *req, void *args);
+int get_filename(const char* uri, char *file);
+int isfile(const char *filepath);
+
+
 
 // 处理get和post的回调方法 //
 // GET方法中的查询字符串（键值对）实际上是从URI中获得的
@@ -118,6 +104,7 @@ void deal_get(struct evhttp_request *req, void *args)
     {
         printf("It's a bad uri. BADREQUEST\n");
         evhttp_send_error(req, HTTP_BADREQUEST, 0);
+        fflush(stdout);
         return;
     }
     evbuffer_add_printf(evb, "You have sent a GET request to the server\r\n");
@@ -173,6 +160,7 @@ void deal_post(struct evhttp_request *req, void *args)
     {
         printf("It's a bad uri. BADREQUEST\n");
         evhttp_send_error(req, HTTP_BADREQUEST, 0);
+        fflush(stdout);
         return;
     }
     evbuffer_add_printf(evb, "You have sent a POST request to the server\r\n");
@@ -203,7 +191,7 @@ void dump(struct evhttp_request *req, void *args)
         evbuffer_free(evb);
 }
 
-// 获取文件路径，获取失败返回0，成功返回1
+// 获取文件路径，0表示进入下载界面，1表示直接进行下载请求
 int get_filename(const char* uri, char *file)
 {
     struct evhttp_uri* decoded = NULL;
@@ -212,25 +200,35 @@ int get_filename(const char* uri, char *file)
     decoded = evhttp_uri_parse(uri);
     decoded_path = evhttp_uri_get_path(decoded);
     download_pos = strstr(decoded_path, "download");
-    if (download_pos)
-    {
-        if (strstr(download_pos, ".."))
-            {
-                fprintf(stderr, "illegal uri\n");
-                return -1;
-            }
-        strcpy(file, DOWNLOADFILEHOME);
-        strcat(file, download_pos + 9);
-    }
-    if (file)
-    {
-        return 1;
-    }
-    else
-    {
-        fprintf(stderr, "%s", "get_failure");
+    /*
+     **libevent will filter ".." into "",so there is no necessary to handle it
+    if (strstr(download_pos, ".."))
+        {
+            fprintf(stderr, "illegal uri\n");
+            return -1;
+        }
+    **
+    */
+    if ('\0' == *(download_pos + 9))
         return 0;
-    }
+    strcpy(file, DOWNLOADFILEHOME);
+    strcat(file, download_pos + 9);
+    return 1;
+}
+
+int isfile(const char *filepath)
+{
+    //TODO: judge whether is a file or not
+    return 1;
+}
+
+// get the size of the file
+int getfileSize(const char*filename)
+{
+    struct stat statbuf;
+    stat(filename, &statbuf);
+    int size = statbuf.st_size;
+    return size;
 }
 
 /*文件上传和下载函数实现*/
@@ -257,26 +255,54 @@ void do_download_file(struct evhttp_request *req, void *args)
     // if in html it's located in <a href="filepath">
     // the request uri looks like "localhost:8800/download/filepath"
     //we need to integrate filepath into a reachable filepath
-    struct evbuffer* evb = evbuffer_new();
-    if (!evb)
-    {
-        fprintf(stderr, "Couldn't create buffer\n");
-        return;
-    }
     const char* uri = evhttp_request_get_uri(req);
     char filepath[MaxFileNameLen];
-    int filestate = 0;
-    filestate = get_filename(uri,filepath);
-    evbuffer_add_printf(evb, "Request URI: %s\r\n", filepath);
-    evhttp_send_reply(req, HTTP_OK, "OK", evb);
-    if(evb)
-        evbuffer_free(evb);
+    int fileFound = get_filename(uri,filepath);
+    if (0 == fileFound)
+    {
+        printf("not found\n");
+        evhttp_send_error(req, HTTP_NOTFOUND, 0);
+        return;
+    } 
+    fflush(stdout);
+    if (isfile(filepath))
+    {
+        struct evbuffer* evb = evbuffer_new();
+        struct evkeyvalq *outheader_kvq = evhttp_request_get_output_headers(req);
+        if (!evb)
+        {
+            fprintf(stderr, "Couldn't create buffer\n");
+            return;
+        }
+        FILE *f = fopen(filepath,"r");
+        fprintf(stderr,"%s\n",filepath);
+        if (NULL == f)
+        {
+            fprintf(stderr,"%s\n","there is no file here");
+            evhttp_send_error(req, HTTP_NOTFOUND, 0);
+            evbuffer_free(evb);
+            return;
+        }
+        int fd = fileno(f);
+        evbuffer_add_file(evb,fd,0,getfileSize(filepath));
+        // 指定下载编码格式
+        evhttp_add_header(outheader_kvq, "Content-Type", "application/octet-stream");
+        evhttp_send_reply(req, HTTP_OK, "OK", evb);
+        if(evb)
+        {
+            evbuffer_free(evb);
+        }
+        fclose(f);
+    }
+    else
+    {
+        evhttp_send_error(req, HTTP_NOTFOUND, 0);
+    }
 }
 
 void general_dispatch(struct evhttp_request *req, void *args)
 {
     const char* uri = evhttp_request_get_uri(req);
-    char *p = strstr(uri,"/download");
     if (strstr(uri, "/download"))
     {
         do_download_file(req,args);
@@ -381,6 +407,7 @@ static int display_listen_sock(struct evhttp_bound_socket* handle)
     {
         printf("Listening on %s:%d\n", addr, got_port);
         evutil_snprintf(uri_root, sizeof(uri_root),"http://%s:%d",addr,got_port);
+        fflush(stdout);
     }
     else
     {
