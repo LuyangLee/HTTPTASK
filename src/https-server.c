@@ -54,7 +54,7 @@
 #include <event2/buffer.h>
 #include <event2/util.h>
 #include <event2/keyvalq_struct.h>
-#include "template.h"
+
 
 #ifdef EVENT__HAVE_NETINET_IN_H
 #include <netinet/in.h>
@@ -182,6 +182,18 @@ void deal_post(struct evhttp_request *req, void *args)
         evbuffer_free(evb);
 }
 
+void do_upload_cb(struct evhttp_request *req, void *args){
+    //For GET, return a HTML file, which will lead to a post
+    if(evhttp_request_get_command(req) == EVHTTP_REQ_GET){
+        upload_get(req,args)
+        return;
+    }
+    if(evhttp_request_get_command(req) == EVHTTP_REQ_POST){
+        upload_post(req,args);
+        return;
+    }
+}
+
 int is_uri_begin_with(const char *uri,const char *s){
     int len = strlen(s);
     int same = 0;
@@ -218,6 +230,7 @@ void upload_get(struct evhttp_request *req, void *args){
         fprintf(stderr, "Couldn't create buffer\n");
         return;
     }
+    //read html/upload.html
     evbuffer_add_printf(evb, UPLOAD_HTML_TEMPLATE);
     evhttp_send_reply(req, HTTP_OK, "OK", evb);
     evbuffer_free(evb);
@@ -630,7 +643,7 @@ static int serve_some_http(void)
 
     /* This is the callback that gets called when a request comes in. */
     evhttp_set_gencb(http, general_dispatch, NULL);
-
+    evhttp_set_cb(http,"/upload",do_upload_cb,NULL)
     /* Now we tell the evhttp what port to listen on */
     //设置监听端口
     handle = evhttp_bind_socket_with_handle(http, "0.0.0.0", serverPort);
