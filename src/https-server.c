@@ -88,9 +88,9 @@ typedef union {
  */
 void upload_get(struct evhttp_request *req, void *args);
 void upload_post(struct evhttp_request *req, void *args);
-void normal_post(struct evhttp_request *req, void *args);
-void download_post(struct evhttp_request *req, void *args);
 
+void download_post(struct evhttp_request *req, void *args);
+int is_uri_begin_with(const char *uri,const char *s);
 // 处理get和post的回调方法 //
 // GET方法中的查询字符串（键值对）实际上是从URI中获得的
 void deal_get(struct evhttp_request *req, void *args)
@@ -117,16 +117,16 @@ void deal_get(struct evhttp_request *req, void *args)
     evbuffer_add_printf(evb, "You have sent a GET request to the server\r\n");
     evbuffer_add_printf(evb, "Request URI: %s\r\n", uri);
     //upload
-    char * beginwith = strstr(uri, "/upload");
-    if (beginwith == uri){
+    if(is_uri_begin_with(uri,"/upload")==0){
         upload_get(req,args);
-    }//upload end
-
-    for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
-    {
-        evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
+    }else{
+        for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
+        {
+            evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
+        }
+        evhttp_send_reply(req, HTTP_OK, "OK", evb);
     }
-    evhttp_send_reply(req, HTTP_OK, "OK", evb);
+
     if(evb)
         evbuffer_free(evb);
 }
@@ -141,19 +141,61 @@ void deal_post(struct evhttp_request *req, void *args)
         fprintf(stderr, "Couldn't create buffer\n");
         return;
     }
-    // upload post
-    const char *uri = evhttp_request_get_uri(req); //
-    char * beginwith = strstr(uri, "/upload");
-    int upload_flag = beginwith == uri;
-    if (upload_flag){
-        upload_post(req,args);
-    }else{
-        normal_post(req,args);
+    // put data and uri into intergrated,
+    size_t origin_uri_size = strlen(evhttp_request_get_uri(req));
+    size_t data_size = EVBUFFER_LENGTH(evhttp_request_get_input_buffer(req));
+    size_t real_uri_size = origin_uri_size + data_size + 3;
+    char data[data_size];
+    memset(data, 0, data_size);
+    char uri[real_uri_size];
+    memset(uri, 0, real_uri_size);
+    if (data_size != 0)
+    {
+        memcpy(data, EVBUFFER_DATA(evhttp_request_get_input_buffer(req)), data_size);
+        snprintf(uri,real_uri_size,"%s?%s",evhttp_request_get_uri(req), data);
+        uri[real_uri_size - 2] = '\0';
     }
-    // download post
+    else
+    {
+        memcpy(uri,evhttp_request_get_uri(req),origin_uri_size);
+    }
 
+    struct evkeyvalq kvs;
+    // printf("%s",uri);
+//    if (evhttp_parse_query(uri,&kvs) != 0)
+//    {
+//        printf("It's a bad uri. BADREQUEST\n");
+//        evhttp_send_error(req, HTTP_BADREQUEST, 0);
+//        return;
+//    }
+    if (is_uri_begin_with(uri,"/upload") == 0){
+        upload_post(req,args);
+    }else if(is_uri_begin_with(uri,"/download")==0){
+        download_post(req,args);
+    }else{
+        evbuffer_add_printf(evb, "You have sent a POST request to the server\r\n");
+        evbuffer_add_printf(evb, "Request URI: %s\r\n", uri);
+        for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
+        {
+            evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
+        }
+        evhttp_send_reply(req, HTTP_OK, "OK", evb);
+    }
+    if(evb)
+        evbuffer_free(evb);
 }
 
+int is_uri_begin_with(const char *uri,const char *s){
+    int len = strlen(s);
+    int same = 0;
+    for(int i=0;i<len;i++){
+        if(uri[i]!=s[i]){
+            same = -1;
+            break;
+        }
+    }
+    return same;
+}
 void dump(struct evhttp_request *req, void *args)
 {
     struct evbuffer *evb = evbuffer_new();
@@ -185,52 +227,16 @@ void upload_get(struct evhttp_request *req, void *args){
 }
 
 void upload_post(struct evhttp_request *req, void *args){
-
-}
-
-void normal_post(struct evhttp_request *req, void *args){
-    // normal post
-    // put data and uri into intergrated,
-    size_t origin_uri_size = strlen(evhttp_request_get_uri(req));
-    size_t data_size = EVBUFFER_LENGTH(evhttp_request_get_input_buffer(req));
-    size_t real_uri_size = origin_uri_size + data_size + 3;
-    char data[data_size];
-    memset(data, 0, data_size);
-    char uri[real_uri_size];
-    memset(uri, 0, real_uri_size);
-    if (data_size != 0)
-    {
-        memcpy(data, EVBUFFER_DATA(evhttp_request_get_input_buffer(req)), data_size);
-        snprintf(uri,real_uri_size,"%s?%s",evhttp_request_get_uri(req), data);
-        uri[real_uri_size - 2] = '\0';
-    }
-    else
-    {
-        memcpy(uri,evhttp_request_get_uri(req),origin_uri_size);
-    }
-    struct evkeyvalq kvs;
-    // printf("%s",uri);
-    if (evhttp_parse_query(uri,&kvs) != 0)
-    {
-        printf("It's a bad uri. BADREQUEST\n");
-        evhttp_send_error(req, HTTP_BADREQUEST, 0);
-        return;
-    }
-    evbuffer_add_printf(evb, "You have sent a POST request to the server\r\n");
-    evbuffer_add_printf(evb, "Request URI: %s\r\n", uri);
-    for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
-    {
-        evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
-    }
+    struct evbuffer *evb = evbuffer_new();
+    evbuffer_add_printf(evb,"Hello there!");
     evhttp_send_reply(req, HTTP_OK, "OK", evb);
-    if(evb)
-        evbuffer_free(evb);
+    evbuffer_free(evb);
 }
-void do_download_file(struct evhttp_request *req, void *args)
-{
-    // Download Format: http://localhost:8800/download/index.html
+
+void download_post(struct evhttp_request *req, void *args){
 
 }
+
 
 void general_dispatch(struct evhttp_request *req, void *args)
 {
