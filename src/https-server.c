@@ -59,7 +59,6 @@
 #ifdef EVENT__HAVE_NETINET_IN_H
 #include <netinet/in.h>
 #ifdef _XOPEN_SOURCE_EXTENDED
-#include <arpa/inet.h>
 #endif
 #endif
 
@@ -71,6 +70,8 @@
 #define O_RDONLY _O_RDONLY
 #endif
 
+#define DOWNLOADFILEHOME "../file/"
+#define MaxFileNameLen 100
 unsigned short serverPort = COMMON_HTTPS_PORT;
 char uri_root[512];
 /* Instead of casting between these types, create a union with all of them,
@@ -88,8 +89,6 @@ typedef union {
  */
 void upload_get(struct evhttp_request *req, void *args);
 void upload_post(struct evhttp_request *req, void *args);
-void normal_post(struct evhttp_request *req, void *args);
-void download_post(struct evhttp_request *req, void *args);
 
 // 处理get和post的回调方法 //
 // GET方法中的查询字符串（键值对）实际上是从URI中获得的
@@ -108,6 +107,7 @@ void deal_get(struct evhttp_request *req, void *args)
     const char *uri = evhttp_request_get_uri(req);
     // kvs是一个的队列，用来存储uri解析后的键-值对,先判断是否是badrequest
     struct evkeyvalq kvs;
+    // printf("%s\n",evhttp_uri_get_path(evhttp_uri_parse(uri)));
     if (evhttp_parse_query(uri,&kvs) != 0)
     {
         printf("It's a bad uri. BADREQUEST\n");
@@ -135,65 +135,18 @@ void deal_get(struct evhttp_request *req, void *args)
 // TODO: analyse different types of the post body(such as form-data)
 void deal_post(struct evhttp_request *req, void *args)
 {
+    //TODO: segment fault when dealing with post upload
     struct evbuffer *evb = evbuffer_new();
+    
     if (!evb)
     {
         fprintf(stderr, "Couldn't create buffer\n");
         return;
     }
-    // upload post
-    const char *uri = evhttp_request_get_uri(req); //
-    char * beginwith = strstr(uri, "/upload");
-    int upload_flag = beginwith == uri;
-    if (upload_flag){
-        upload_post(req,args);
-    }else{
-        normal_post(req,args);
-    }
-    // download post
-
-}
-
-void dump(struct evhttp_request *req, void *args)
-{
-    struct evbuffer *evb = evbuffer_new();
-    if (!evb)
-    {
-        fprintf(stderr, "Couldn't create buffer\n");
-        return;
-    }
-    const char *uri = evhttp_request_get_uri(req);
-    evbuffer_add_printf(evb, "You have sent a some request to the server\r\n");
-    evbuffer_add_printf(evb, "Request URI: %s\r\n", uri);
-    evbuffer_add_printf(evb, "sorry wo don't have this analysis,expect futural addition\r\n");
-    evhttp_send_reply(req, HTTP_OK, "OK", evb);
-    if(evb)
-        evbuffer_free(evb);
-}
-
-
-void upload_get(struct evhttp_request *req, void *args){
-    struct evbuffer *evb = evbuffer_new();
-    if (!evb)
-    {
-        fprintf(stderr, "Couldn't create buffer\n");
-        return;
-    }
-    evbuffer_add_printf(evb, UPLOAD_HTML_TEMPLATE);
-    evhttp_send_reply(req, HTTP_OK, "OK", evb);
-    evbuffer_free(evb);
-}
-
-void upload_post(struct evhttp_request *req, void *args){
-
-}
-
-void normal_post(struct evhttp_request *req, void *args){
-    // normal post
-    // put data and uri into intergrated,
+    // put data and uri into intergrated, 
     size_t origin_uri_size = strlen(evhttp_request_get_uri(req));
     size_t data_size = EVBUFFER_LENGTH(evhttp_request_get_input_buffer(req));
-    size_t real_uri_size = origin_uri_size + data_size + 3;
+    size_t real_uri_size = origin_uri_size + data_size + 3; 
     char data[data_size];
     memset(data, 0, data_size);
     char uri[real_uri_size];
@@ -206,7 +159,7 @@ void normal_post(struct evhttp_request *req, void *args){
     }
     else
     {
-        memcpy(uri,evhttp_request_get_uri(req),origin_uri_size);
+        memcpy(uri,evhttp_request_get_uri(req),origin_uri_size); 
     }
     struct evkeyvalq kvs;
     // printf("%s",uri);
@@ -226,16 +179,106 @@ void normal_post(struct evhttp_request *req, void *args){
     if(evb)
         evbuffer_free(evb);
 }
+
+void dump(struct evhttp_request *req, void *args)
+{
+    struct evbuffer *evb = evbuffer_new();
+    if (!evb)
+    {
+        fprintf(stderr, "Couldn't create buffer\n");
+        return;
+    }
+    const char *uri = evhttp_request_get_uri(req);
+    evbuffer_add_printf(evb, "You have sent a some request to the server\r\n");
+    evbuffer_add_printf(evb, "Request URI: %s\r\n", uri);
+    evbuffer_add_printf(evb, "sorry wo don't have this analysis,expect futural addition\r\n");
+    evhttp_send_reply(req, HTTP_OK, "OK", evb);
+    if(evb)
+        evbuffer_free(evb);
+}
+
+// 获取文件路径，获取失败返回0，成功返回1
+int get_filename(const char* uri, char *file)
+{
+    struct evhttp_uri* decoded = NULL;
+    const char *decoded_path = NULL;
+    char *download_pos = NULL;
+    decoded = evhttp_uri_parse(uri);
+    decoded_path = evhttp_uri_get_path(decoded);
+    download_pos = strstr(decoded_path, "download");
+    if (download_pos)
+    {
+        if (strstr(download_pos, ".."))
+            {
+                fprintf(stderr, "illegal uri\n");
+                return -1;
+            }
+        strcpy(file, DOWNLOADFILEHOME);
+        strcat(file, download_pos + 9);
+    }
+    if (file)
+    {
+        return 1;
+    }
+    else
+    {
+        fprintf(stderr, "%s", "get_failure");
+        return 0;
+    }
+}
+
+/*文件上传和下载函数实现*/
+void do_upload_file(struct evhttp_request *req, void *args)
+{
+}
+
+void upload_get(struct evhttp_request *req, void *args){
+    struct evbuffer *evb = evbuffer_new();
+    if (!evb)
+    {
+        fprintf(stderr, "Couldn't create buffer\n");
+        return;
+    }
+    evbuffer_add_printf(evb, UPLOAD_HTML_TEMPLATE);
+    evhttp_send_reply(req, HTTP_OK, "OK", evb);
+    evbuffer_free(evb);
+}
+
+void upload_post(){
+
+}
+
 void do_download_file(struct evhttp_request *req, void *args)
 {
-    // Download Format: http://localhost:8800/download/index.html
-
+    // the format of a file is "file:///C:/Users/SophiaLLY/Downloads/MLY-zh-cn.pdf"
+    // if in html it's located in <a href="filepath">
+    // the request uri looks like "localhost:8800/download/filepath"
+    //we need to integrate filepath into a reachable filepath
+    struct evbuffer* evb = evbuffer_new();
+    if (!evb)
+    {
+        fprintf(stderr, "Couldn't create buffer\n");
+        return;
+    }
+    const char* uri = evhttp_request_get_uri(req);
+    char filepath[MaxFileNameLen];
+    int filestate = 0;
+    filestate = get_filename(uri,filepath);
+    evbuffer_add_printf(evb, "Request URI: %s\r\n", filepath);
+    evhttp_send_reply(req, HTTP_OK, "OK", evb);
+    if(evb)
+        evbuffer_free(evb);
 }
 
 void general_dispatch(struct evhttp_request *req, void *args)
 {
     const char* uri = evhttp_request_get_uri(req);
-    //TODO: analyse uri
+    char *p = strstr(uri,"/download");
+    if (strstr(uri, "/download"))
+    {
+        do_download_file(req,args);
+        return;
+    }
     enum evhttp_cmd_type nowReq = evhttp_request_get_command(req);
     if (nowReq == EVHTTP_REQ_GET)
     {
@@ -251,77 +294,6 @@ void general_dispatch(struct evhttp_request *req, void *args)
     }
     
 }
-
-/**
- *
- * 
-static void
-send_document_cb(struct evhttp_request *req, void *arg)
-{
-    struct evbuffer *evb = NULL;
-    //获取请求的uri,处理请求的类型:GET、POST、其他
-    const char *uri = evhttp_request_get_uri(req); 
-    struct evhttp_uri *decoded = NULL;
-    const char* path = NULL;
-    char *decoded_path = NULL;
-    char *whole_path = NULL;
-
-    if (evhttp_request_get_command(req) == EVHTTP_REQ_GET)
-    { //curl -k  https://localhost:8421/会跳转至该函数进行执行然后return
-        struct evbuffer *buf = evbuffer_new();
-        if (buf == NULL)
-            return;
-        evbuffer_add_printf(buf, "Requested: %s\n", uri);
-        evhttp_send_reply(req, HTTP_OK, "OK", buf);
-        return;
-    }
-
-    // We only handle POST requests. //
-    if (evhttp_request_get_command(req) != EVHTTP_REQ_POST)
-    {
-        evhttp_send_reply(req, 200, "OK", NULL);
-        return;
-    }
-
-    printf("Got a POST request for <%s>\n", uri);
-
-    //将uri分段为各个部分,当uri存在err，evhttp_uri_parse返回NULL
-    decoded = evhttp_uri_parse(uri); 
-    if (!decoded)                                       
-    {
-        printf("It's not a good URI. Sending BADREQUEST\n");
-        evhttp_send_error(req, HTTP_BADREQUEST, 0);
-        return;
-    }
-
-    // Decode the payload //
-    //kv为一个evkeyval队列,key-value queue(队列结构)，主要用来保存HTTP headers
-    //也可以被用来保存parse uri参数的结果
-    struct evkeyvalq kv ;
-    struct evbuffer *buff = evbuffer_new();
-    memset(&kv, 0, sizeof(kv)); //清空缓冲队列，全部置0
-
-    if (0 != evhttp_parse_query(buff, &kv)) //Helper函数可从HTTP URI的查询部分中解析出参数
-    {
-        printf("Malformed payload. Sending BADREQUEST\n");
-        evhttp_send_error(req, HTTP_BADREQUEST, 0);
-        return;
-    }
-    evbuffer_add_printf(buff, "You have sent a POST request to the server\r\n");
-    evbuffer_add_printf(buff, "Request URI: %s\r\n", evhttp_request_get_uri(req));
-    for (struct evkeyval *head = kv.tqh_first; head != NULL; head = head->next.tqe_next)
-    {
-        evbuffer_add_printf(buff, "%s=%s\n", head->key, head->value);
-    }
-
-    evhttp_send_reply(req, 200, "OK", buff);
-    if (decoded)
-        evhttp_uri_free(decoded);
-    if (buff)
-        evbuffer_free(buff);
-}
-*
-*/
 
 /**
  * This callback is responsible for creating a new SSL connection
