@@ -3,7 +3,9 @@
 
 #ifndef COMMON_MAN
 #define COMMON_MAN
-
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 /**
  * Rather than using the standard https port of 443, use this one.
  */

@@ -35,3 +35,5 @@
     });\
   </script>\
 </html>"
+
+#define DOWNLOARD_HTML_TEMPLATE \

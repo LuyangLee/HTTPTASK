@@ -1,20 +1,3 @@
-/* Derived from sample/http-server.c in libevent source tree.
- * That file does not have a license notice, but generally libevent
- * is under the 3-clause BSD.
- *
- * Plus, some additional inspiration from:
- * http://archives.seul.org/libevent/users/Jul-2010/binGK8dlinMqP.bin
- * (which is a .c file despite the extension and mime type) */
-
-/*
-  A trivial https webserver using Libevent's evhttp.
-
-  This is not the best code in the world, and it does some fairly stupid stuff
-  that you would never want to do in a production webserver. Caveat hackor!
-
- */
-
-#include "https-common.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,10 +5,8 @@
 #include <limits.h>
 #include <stddef.h>
 
-
 #include <sys/types.h>
 #include <sys/stat.h>
-
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -54,12 +35,12 @@
 #include <event2/buffer.h>
 #include <event2/util.h>
 #include <event2/keyvalq_struct.h>
+#include "https-common.h"
 #include "template.h"
 
 #ifdef EVENT__HAVE_NETINET_IN_H
 #include <netinet/in.h>
 #ifdef _XOPEN_SOURCE_EXTENDED
-#include <arpa/inet.h>
 #endif
 #endif
 
@@ -71,6 +52,9 @@
 #define O_RDONLY _O_RDONLY
 #endif
 
+#define DOWNLOADFILEHOME "./file/"
+#define MaxFileNameLen 100
+#define HTTP_FORBIDDEN 403
 unsigned short serverPort = COMMON_HTTPS_PORT;
 char uri_root[512];
 /* Instead of casting between these types, create a union with all of them,
@@ -86,11 +70,18 @@ typedef union {
  * any other callback.  Like any evhttp server callback, it has a simple job:
  * it must eventually call evhttp_send_error() or evhttp_send_reply().
  */
+void deal_get(struct evhttp_request *req, void *args);
+void deal_post(struct evhttp_request *req, void *args);
+void dump(struct evhttp_request *req, void *args);
 void upload_get(struct evhttp_request *req, void *args);
 void upload_post(struct evhttp_request *req, void *args);
+void do_download_file(struct evhttp_request *req, void *args);
+void general_dispatch(struct evhttp_request *req, void *args);
+int get_filename(const char* uri, char *file);
+int isfile(const char *filepath);
 
-void download_post(struct evhttp_request *req, void *args);
-int is_uri_begin_with(const char *uri,const char *s);
+
+
 // 处理get和post的回调方法 //
 // GET方法中的查询字符串（键值对）实际上是从URI中获得的
 void deal_get(struct evhttp_request *req, void *args)
@@ -108,25 +99,27 @@ void deal_get(struct evhttp_request *req, void *args)
     const char *uri = evhttp_request_get_uri(req);
     // kvs是一个的队列，用来存储uri解析后的键-值对,先判断是否是badrequest
     struct evkeyvalq kvs;
+    // printf("%s\n",evhttp_uri_get_path(evhttp_uri_parse(uri)));
     if (evhttp_parse_query(uri,&kvs) != 0)
     {
         printf("It's a bad uri. BADREQUEST\n");
         evhttp_send_error(req, HTTP_BADREQUEST, 0);
+        fflush(stdout);
         return;
     }
     evbuffer_add_printf(evb, "You have sent a GET request to the server\r\n");
     evbuffer_add_printf(evb, "Request URI: %s\r\n", uri);
     //upload
-    if(is_uri_begin_with(uri,"/upload")==0){
+    char * beginwith = strstr(uri, "/upload");
+    if (beginwith == uri){
         upload_get(req,args);
-    }else{
-        for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
-        {
-            evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
-        }
-        evhttp_send_reply(req, HTTP_OK, "OK", evb);
-    }
+    }//upload end
 
+    for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
+    {
+        evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
+    }
+    evhttp_send_reply(req, HTTP_OK, "OK", evb);
     if(evb)
         evbuffer_free(evb);
 }
@@ -135,16 +128,18 @@ void deal_get(struct evhttp_request *req, void *args)
 // TODO: analyse different types of the post body(such as form-data)
 void deal_post(struct evhttp_request *req, void *args)
 {
+    //TODO: segment fault when dealing with post upload
     struct evbuffer *evb = evbuffer_new();
+    
     if (!evb)
     {
         fprintf(stderr, "Couldn't create buffer\n");
         return;
     }
-    // put data and uri into intergrated,
+    // put data and uri into intergrated, 
     size_t origin_uri_size = strlen(evhttp_request_get_uri(req));
     size_t data_size = EVBUFFER_LENGTH(evhttp_request_get_input_buffer(req));
-    size_t real_uri_size = origin_uri_size + data_size + 3;
+    size_t real_uri_size = origin_uri_size + data_size + 3; 
     char data[data_size];
     memset(data, 0, data_size);
     char uri[real_uri_size];
@@ -157,45 +152,28 @@ void deal_post(struct evhttp_request *req, void *args)
     }
     else
     {
-        memcpy(uri,evhttp_request_get_uri(req),origin_uri_size);
+        memcpy(uri,evhttp_request_get_uri(req),origin_uri_size); 
     }
-
     struct evkeyvalq kvs;
     // printf("%s",uri);
-//    if (evhttp_parse_query(uri,&kvs) != 0)
-//    {
-//        printf("It's a bad uri. BADREQUEST\n");
-//        evhttp_send_error(req, HTTP_BADREQUEST, 0);
-//        return;
-//    }
-    if (is_uri_begin_with(uri,"/upload") == 0){
-        upload_post(req,args);
-    }else if(is_uri_begin_with(uri,"/download")==0){
-        download_post(req,args);
-    }else{
-        evbuffer_add_printf(evb, "You have sent a POST request to the server\r\n");
-        evbuffer_add_printf(evb, "Request URI: %s\r\n", uri);
-        for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
-        {
-            evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
-        }
-        evhttp_send_reply(req, HTTP_OK, "OK", evb);
+    if (evhttp_parse_query(uri,&kvs) != 0)
+    {
+        printf("It's a bad uri. BADREQUEST\n");
+        evhttp_send_error(req, HTTP_BADREQUEST, 0);
+        fflush(stdout);
+        return;
     }
+    evbuffer_add_printf(evb, "You have sent a POST request to the server\r\n");
+    evbuffer_add_printf(evb, "Request URI: %s\r\n", uri);
+    for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
+    {
+        evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
+    }
+    evhttp_send_reply(req, HTTP_OK, "OK", evb);
     if(evb)
         evbuffer_free(evb);
 }
 
-int is_uri_begin_with(const char *uri,const char *s){
-    int len = strlen(s);
-    int same = 0;
-    for(int i=0;i<len;i++){
-        if(uri[i]!=s[i]){
-            same = -1;
-            break;
-        }
-    }
-    return same;
-}
 void dump(struct evhttp_request *req, void *args)
 {
     struct evbuffer *evb = evbuffer_new();
@@ -213,6 +191,50 @@ void dump(struct evhttp_request *req, void *args)
         evbuffer_free(evb);
 }
 
+// 获取文件路径，0表示进入下载界面，1表示直接进行下载请求
+int get_filename(const char* uri, char *file)
+{
+    struct evhttp_uri* decoded = NULL;
+    const char *decoded_path = NULL;
+    char *download_pos = NULL;
+    decoded = evhttp_uri_parse(uri);
+    decoded_path = evhttp_uri_get_path(decoded);
+    download_pos = strstr(decoded_path, "download");
+    /*
+     **libevent will filter ".." into "",so there is no necessary to handle it
+    if (strstr(download_pos, ".."))
+        {
+            fprintf(stderr, "illegal uri\n");
+            return -1;
+        }
+    **
+    */
+    if ('\0' == *(download_pos + 9))
+        return 0;
+    strcpy(file, DOWNLOADFILEHOME);
+    strcat(file, download_pos + 9);
+    return 1;
+}
+
+int isfile(const char *filepath)
+{
+    //TODO: judge whether is a file or not
+    return 1;
+}
+
+// get the size of the file
+int getfileSize(const char*filename)
+{
+    struct stat statbuf;
+    stat(filename, &statbuf);
+    int size = statbuf.st_size;
+    return size;
+}
+
+/*文件上传和下载函数实现*/
+void do_upload_file(struct evhttp_request *req, void *args)
+{
+}
 
 void upload_get(struct evhttp_request *req, void *args){
     struct evbuffer *evb = evbuffer_new();
@@ -226,22 +248,66 @@ void upload_get(struct evhttp_request *req, void *args){
     evbuffer_free(evb);
 }
 
-void upload_post(struct evhttp_request *req, void *args){
-    struct evbuffer *evb = evbuffer_new();
-    evbuffer_add_printf(evb,"Hello there!");
-    evhttp_send_reply(req, HTTP_OK, "OK", evb);
-    evbuffer_free(evb);
+
+void do_download_file(struct evhttp_request *req, void *args)
+{
+    // the format of a file is "file:///C:/Users/SophiaLLY/Downloads/MLY-zh-cn.pdf"
+    // if in html it's located in <a href="filepath">
+    // the request uri looks like "localhost:8800/download/filepath"
+    //we need to integrate filepath into a reachable filepath
+    const char* uri = evhttp_request_get_uri(req);
+    char filepath[MaxFileNameLen];
+    int fileFound = get_filename(uri,filepath);
+    if (0 == fileFound)
+    {
+        printf("not found\n");
+        evhttp_send_error(req, HTTP_NOTFOUND, 0);
+        return;
+    } 
+    fflush(stdout);
+    if (isfile(filepath))
+    {
+        struct evbuffer* evb = evbuffer_new();
+        struct evkeyvalq *outheader_kvq = evhttp_request_get_output_headers(req);
+        if (!evb)
+        {
+            fprintf(stderr, "Couldn't create buffer\n");
+            return;
+        }
+        FILE *f = fopen(filepath,"r");
+        fprintf(stderr,"%s\n",filepath);
+        if (NULL == f)
+        {
+            fprintf(stderr,"%s\n","there is no file here");
+            evhttp_send_error(req, HTTP_NOTFOUND, 0);
+            evbuffer_free(evb);
+            return;
+        }
+        int fd = fileno(f);
+        evbuffer_add_file(evb,fd,0,getfileSize(filepath));
+        // 指定下载编码格式
+        evhttp_add_header(outheader_kvq, "Content-Type", "application/octet-stream");
+        evhttp_send_reply(req, HTTP_OK, "OK", evb);
+        if(evb)
+        {
+            evbuffer_free(evb);
+        }
+        fclose(f);
+    }
+    else
+    {
+        evhttp_send_error(req, HTTP_NOTFOUND, 0);
+    }
 }
-
-void download_post(struct evhttp_request *req, void *args){
-
-}
-
 
 void general_dispatch(struct evhttp_request *req, void *args)
 {
     const char* uri = evhttp_request_get_uri(req);
-    //TODO: analyse uri
+    if (strstr(uri, "/download"))
+    {
+        do_download_file(req,args);
+        return;
+    }
     enum evhttp_cmd_type nowReq = evhttp_request_get_command(req);
     if (nowReq == EVHTTP_REQ_GET)
     {
@@ -257,77 +323,6 @@ void general_dispatch(struct evhttp_request *req, void *args)
     }
     
 }
-
-/**
- *
- * 
-static void
-send_document_cb(struct evhttp_request *req, void *arg)
-{
-    struct evbuffer *evb = NULL;
-    //获取请求的uri,处理请求的类型:GET、POST、其他
-    const char *uri = evhttp_request_get_uri(req); 
-    struct evhttp_uri *decoded = NULL;
-    const char* path = NULL;
-    char *decoded_path = NULL;
-    char *whole_path = NULL;
-
-    if (evhttp_request_get_command(req) == EVHTTP_REQ_GET)
-    { //curl -k  https://localhost:8421/会跳转至该函数进行执行然后return
-        struct evbuffer *buf = evbuffer_new();
-        if (buf == NULL)
-            return;
-        evbuffer_add_printf(buf, "Requested: %s\n", uri);
-        evhttp_send_reply(req, HTTP_OK, "OK", buf);
-        return;
-    }
-
-    // We only handle POST requests. //
-    if (evhttp_request_get_command(req) != EVHTTP_REQ_POST)
-    {
-        evhttp_send_reply(req, 200, "OK", NULL);
-        return;
-    }
-
-    printf("Got a POST request for <%s>\n", uri);
-
-    //将uri分段为各个部分,当uri存在err，evhttp_uri_parse返回NULL
-    decoded = evhttp_uri_parse(uri); 
-    if (!decoded)                                       
-    {
-        printf("It's not a good URI. Sending BADREQUEST\n");
-        evhttp_send_error(req, HTTP_BADREQUEST, 0);
-        return;
-    }
-
-    // Decode the payload //
-    //kv为一个evkeyval队列,key-value queue(队列结构)，主要用来保存HTTP headers
-    //也可以被用来保存parse uri参数的结果
-    struct evkeyvalq kv ;
-    struct evbuffer *buff = evbuffer_new();
-    memset(&kv, 0, sizeof(kv)); //清空缓冲队列，全部置0
-
-    if (0 != evhttp_parse_query(buff, &kv)) //Helper函数可从HTTP URI的查询部分中解析出参数
-    {
-        printf("Malformed payload. Sending BADREQUEST\n");
-        evhttp_send_error(req, HTTP_BADREQUEST, 0);
-        return;
-    }
-    evbuffer_add_printf(buff, "You have sent a POST request to the server\r\n");
-    evbuffer_add_printf(buff, "Request URI: %s\r\n", evhttp_request_get_uri(req));
-    for (struct evkeyval *head = kv.tqh_first; head != NULL; head = head->next.tqe_next)
-    {
-        evbuffer_add_printf(buff, "%s=%s\n", head->key, head->value);
-    }
-
-    evhttp_send_reply(req, 200, "OK", buff);
-    if (decoded)
-        evhttp_uri_free(decoded);
-    if (buff)
-        evbuffer_free(buff);
-}
-*
-*/
 
 /**
  * This callback is responsible for creating a new SSL connection
@@ -412,6 +407,7 @@ static int display_listen_sock(struct evhttp_bound_socket* handle)
     {
         printf("Listening on %s:%d\n", addr, got_port);
         evutil_snprintf(uri_root, sizeof(uri_root),"http://%s:%d",addr,got_port);
+        fflush(stdout);
     }
     else
     {
