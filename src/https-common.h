@@ -10,11 +10,13 @@
  * Rather than using the standard https port of 443, use this one.
  */
 #define COMMON_HTTPS_PORT 8800
+#define DOWNLOADFILEHOME "./file/"
+#define MaxFileNameLen 100
+#define MaxFileLen 150
+#define DOWNLOAD_FILE_IN_CHUNK 4
+#define DOWNLOAD_FILE 1
 
-/**
- * This is the string the client tells the server in the POST request.
- */
-#define COMMON_PASSCODE "R23"
+
 
 /**
  * If an OpenSSL function returns a return value indicating failure
