@@ -116,15 +116,13 @@ void deal_get(struct evhttp_request *req, void *args)
     evbuffer_add_printf(evb, "You have sent a GET request to the server\r\n");
     evbuffer_add_printf(evb, "Request URI: %s\r\n", uri);
     //upload
-    if(is_uri_begin_with(uri,"/upload")==0){
-        upload_get(req,args);
-    }else{
-        for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
-        {
-            evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
-        }
-        evhttp_send_reply(req, HTTP_OK, "OK", evb);
+
+    for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
+    {
+        evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
     }
+    evhttp_send_reply(req, HTTP_OK, "OK", evb);
+
 
     if(evb)
         evbuffer_free(evb);
