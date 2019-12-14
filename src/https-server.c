@@ -52,9 +52,7 @@
 #define O_RDONLY _O_RDONLY
 #endif
 
-#define DOWNLOADFILEHOME "./file/"
-#define MaxFileNameLen 100
-#define HTTP_FORBIDDEN 403
+
 unsigned short serverPort = COMMON_HTTPS_PORT;
 char uri_root[512];
 /* Instead of casting between these types, create a union with all of them,
@@ -78,7 +76,7 @@ void upload_post(struct evhttp_request *req, void *args);
 void do_download_file(struct evhttp_request *req, void *args);
 void general_dispatch(struct evhttp_request *req, void *args);
 int get_filename(const char* uri, char *file);
-int isfile(const char *filepath);
+int isfile(const char *filepath, char * findname);
 
 void upload_get(struct evhttp_request *req, void *args);
 void upload_post(struct evhttp_request *req, void *args);
@@ -235,10 +233,41 @@ int get_filename(const char* uri, char *file)
     return 1;
 }
 
-int isfile(const char *filepath)
+int isfile(const char *filepath, char * findname)
 {
-    //TODO: judge whether is a file or not
-    return 1;
+    DIR *dir;
+    struct dirent *d;
+    if ((dir = opendir(findname)) == NULL)
+    {
+        fprintf(stderr, "%s\n", "is not a dir");
+        return -1;
+    }
+    while ((d = readdir(dir)))
+    {
+        if (0 == strcmp("..",d->d_name) || 0 == strcmp(".", d->d_name))
+            continue;
+        // printf("%d\n", d->d_type);
+        // printf("%s\n", d->d_name);
+        if (d->d_type == 8)
+        {   
+            strcat(findname, d->d_name);
+            if (0 == strcmp(findname, filepath))
+            {
+                return 1;
+            }
+        }
+        else if (d->d_type == 4)
+        {
+            
+            strcat(findname, d->d_name);
+            strcat(findname, "/");
+            return isfile(findname,findname);
+            
+        }
+    }
+    // printf("%s\n",findname );
+    closedir(dir);
+    return 0;
 }
 
 // get the size of the file
@@ -282,7 +311,11 @@ void do_download_file(struct evhttp_request *req, void *args)
     //we need to integrate filepath into a reachable filepath
     const char* uri = evhttp_request_get_uri(req);
     char filepath[MaxFileNameLen];
+    char findpath[MaxFileLen];
+    memset(findpath, '\0', MaxFileLen);
+    strcat(findpath, DOWNLOADFILEHOME);
     int fileFound = get_filename(uri,filepath);
+    // TODO: return download pages
     if (0 == fileFound)
     {
         printf("not found\n");
@@ -290,17 +323,17 @@ void do_download_file(struct evhttp_request *req, void *args)
         return;
     } 
     fflush(stdout);
-    if (isfile(filepath))
-    {
-        struct evbuffer* evb = evbuffer_new();
-        struct evkeyvalq *outheader_kvq = evhttp_request_get_output_headers(req);
+    printf("%s\n", filepath);
+    if (isfile(filepath, findpath))
+    {   
+        struct evbuffer *evb = evbuffer_new();
+        struct evkeyvalq* outHeader_kvq = evhttp_request_get_output_headers(req);
         if (!evb)
         {
             fprintf(stderr, "Couldn't create buffer\n");
             return;
         }
         FILE *f = fopen(filepath,"r");
-        fprintf(stderr,"%s\n",filepath);
         if (NULL == f)
         {
             fprintf(stderr,"%s\n","there is no file here");
@@ -309,14 +342,17 @@ void do_download_file(struct evhttp_request *req, void *args)
             return;
         }
         int fd = fileno(f);
+        // TODO: judge Connections state
+        struct evkeyvalq* inHeader = evhttp_request_get_input_headers(req);
+        const char* linktype = evhttp_find_header(inHeader, "Connection");
+        // judge to choose the chunk tansmission or whole file
+        // if (DOWNLOAD_FILE_IN_CHUNK)
         evbuffer_add_file(evb,fd,0,getfileSize(filepath));
         // 指定下载编码格式
-        evhttp_add_header(outheader_kvq, "Content-Type", "application/octet-stream");
+        evhttp_add_header(outHeader_kvq, "Content-Type", "application/octet-stream");
+        printf('%s\n', "download success.");
         evhttp_send_reply(req, HTTP_OK, "OK", evb);
-        if(evb)
-        {
-            evbuffer_free(evb);
-        }
+        evbuffer_free(evb);
         fclose(f);
     }
     else
