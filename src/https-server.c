@@ -165,19 +165,15 @@ void deal_post(struct evhttp_request *req, void *args)
 //        evhttp_send_error(req, HTTP_BADREQUEST, 0);
 //        return;
 //    }
-    if (is_uri_begin_with(uri,"/upload") == 0){
-        upload_post(req,args);
-    }else if(is_uri_begin_with(uri,"/download")==0){
-        download_post(req,args);
-    }else{
-        evbuffer_add_printf(evb, "You have sent a POST request to the server\r\n");
-        evbuffer_add_printf(evb, "Request URI: %s\r\n", uri);
-        for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
-        {
-            evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
-        }
-        evhttp_send_reply(req, HTTP_OK, "OK", evb);
+
+    evbuffer_add_printf(evb, "You have sent a POST request to the server\r\n");
+    evbuffer_add_printf(evb, "Request URI: %s\r\n", uri);
+    for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
+    {
+        evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
     }
+    evhttp_send_reply(req, HTTP_OK, "OK", evb);
+
     if(evb)
         evbuffer_free(evb);
 }
@@ -186,11 +182,8 @@ void do_upload_cb(struct evhttp_request *req, void *args){
     //For GET, return a HTML file, which will lead to a post
     if(evhttp_request_get_command(req) == EVHTTP_REQ_GET){
         upload_get(req,args);
-        return;
-    }
-    if(evhttp_request_get_command(req) == EVHTTP_REQ_POST){
+    }else if(evhttp_request_get_command(req) == EVHTTP_REQ_POST){
         upload_post(req,args);
-        return;
     }
 }
 
@@ -256,22 +249,21 @@ void upload_get(struct evhttp_request *req, void *args){
     evhttp_send_reply(req, HTTP_OK, "OK", evb);
     if(evb)
         evbuffer_free(evb);
-
 }
 //
-//char *get_formdata_filename(const char *data, int *len)
-//{
-//    // get file name from data, return the address of beginning of filenamr and store length in len
-//    char *begin = strstr(data, "filename=\"") + 10;
-//    char *end = strstr(begin, "\"");
-//    *len = end - begin;
-//    char file_name[*len + 1];
-//    memcpy(file_name, begin, *len);
-//    file_name[*len] = 0;
-//    printf("Filename: %s\n", file_name);
-//    fflush(stdout);
-//    return begin;
-//}
+char *get_formdata_filename(const char *data, int *len)
+{
+    // get file name from data, return the address of beginning of filenamr and store length in len
+    char *begin = strstr(data, "filename=\"") + 10;
+    char *end = strstr(begin, "\"");
+    *len = end - begin;
+    char file_name[*len + 1];
+    memcpy(file_name, begin, *len);
+    file_name[*len] = 0;
+    printf("Filename: %s\n", file_name);
+    fflush(stdout);
+    return begin;
+}
 //char *get_formdata_path(const char *data, int *len, size_t data_length)
 //{
 //    // get request path from data, return the address of beginning of path and store length in len
@@ -377,18 +369,22 @@ void upload_get(struct evhttp_request *req, void *args){
 //    }
 //}
 void upload_post(struct evhttp_request *req, void *args){
+
     // file upload post handler
     // Actual upload process
-//    size_t buffer_length = EVBUFFER_LENGTH(evhttp_request_get_input_buffer(req));
-//    printf("Buffer-Length: %ld", buffer_length);
-//    char input_buffer[buffer_length];
-//
-//    memcpy(input_buffer, EVBUFFER_DATA(evhttp_request_get_input_buffer(req)), buffer_length);
+    struct evbuffer* req_buff = evhttp_request_get_input_buffer(req);
+
+    size_t buffer_length = evbuffer_get_length(evhttp_request_get_input_buffer(req));
+    printf("Buffer-Length: %ld", buffer_length);
+
+    char *input_buffer = (char*)malloc(sizeof(char)*buffer_length);
+    evbuffer_remove(req_buff,input_buffer, sizeof(char)*buffer_length);
+
 //    for (int i = 0; i < buffer_length; i++)
 //    {
 //        printf("%c", input_buffer[i]);
 //    }
-//    struct evbuffer *buff = evbuffer_new();
+    struct evbuffer *buff = evbuffer_new();
 //    struct evkeyvalq *output_header_kvq = evhttp_request_get_output_headers(req);
 //    // File name
 //    int file_name_len;
@@ -417,7 +413,7 @@ void upload_post(struct evhttp_request *req, void *args){
 //    int res = save_file(file_path, file_name, file_content, file_content_len);
 //    if (res)
 //    {
-//        evhttp_send_reply(req, HTTP_OK, "OK", buff);
+        evhttp_send_reply(req, HTTP_OK, "OK", buff);
 //    }
 //    else
 //    {
