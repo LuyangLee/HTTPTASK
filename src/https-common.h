@@ -13,8 +13,9 @@
 #define DOWNLOADFILEHOME "./file/"
 #define MaxFileNameLen 100
 #define MaxFileLen 150
-#define DOWNLOAD_FILE_IN_CHUNK 4
-#define DOWNLOAD_FILE 1
+#define DOWNLOAD_FILE_IN_CHUNK 4*1024
+#define TRANSWHOLE 0  // 0 means tansfer the whole file
+#define TRANSCHUNK 1  // 1 means tansfer chunks of the file 
 
 
 
