@@ -10,12 +10,11 @@
  * Rather than using the standard https port of 443, use this one.
  */
 #define COMMON_HTTPS_PORT 8800
-#define DOWNLOADFILEHOME "./file/"
-#define MaxFileNameLen 100
-#define MaxFileLen 150
-#define DOWNLOAD_FILE_IN_CHUNK 4*1024
-#define TRANSWHOLE 0  // 0 means tansfer the whole file
-#define TRANSCHUNK 1  // 1 means tansfer chunks of the file 
+#define DOWNLOADFILEHOME "./file"
+#define MaxFileNameLen 1000
+#define MaxFileLen 1500
+#define DOWNLOAD_FILE_IN_CHUNK 4
+#define DOWNLOAD_FILE 1
 
 
 

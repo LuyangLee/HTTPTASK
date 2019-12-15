@@ -4,6 +4,7 @@
 #include <string.h>
 #include <limits.h>
 #include <stddef.h>
+#include <dirent.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -21,7 +22,6 @@
 #include <sys/socket.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <dirent.h>
 #endif
 
 #include <openssl/ssl.h>
@@ -215,8 +215,9 @@ int get_filename(const char* uri, char *file)
     const char *decoded_path = NULL;
     char *download_pos = NULL;
     decoded = evhttp_uri_parse(uri);
-    decoded_path = evhttp_uri_get_path(decoded);
-    download_pos = strstr(decoded_path, "download");
+    const char *path = evhttp_uri_get_path(decoded);
+    decoded_path = evhttp_uridecode(path, 0, NULL);
+    download_pos = strstr(decoded_path, "/download");
     /*
      **libevent will filter ".." into "",so there is no necessary to handle it
     if (strstr(download_pos, ".."))
@@ -260,7 +261,7 @@ int isfile(const char *filepath, char * findname)
         {
             
             strcat(findname, d->d_name);
-            strcat(findname, "/");
+            //strcat(findname, "/");
             return isfile(findname,findname);
             
         }
@@ -279,6 +280,17 @@ int getfileSize(const char*filename)
     return size;
 }
 
+int is_dir(char *path)
+{
+    // to judge a path is dir
+    struct stat st;
+    stat(path, &st);
+    if (S_ISDIR(st.st_mode))
+    {
+        return 1;
+    }
+    return 0;
+}
 
 void upload_get(struct evhttp_request *req, void *args){
     struct evbuffer *evb = evbuffer_new();
@@ -309,6 +321,8 @@ void do_download_file(struct evhttp_request *req, void *args)
     // if in html it's located in <a href="filepath">
     // the request uri looks like "localhost:8800/download/filepath"
     //we need to integrate filepath into a reachable filepath
+    int DOWNLOAD_FILE_CHUNK_OPTION = 1;
+    int CHUNK_SIZE = 4 * 1024;
     const char* uri = evhttp_request_get_uri(req);
     char filepath[MaxFileNameLen];
     char findpath[MaxFileLen];
@@ -318,53 +332,112 @@ void do_download_file(struct evhttp_request *req, void *args)
     // TODO: return download pages
     if (0 == fileFound)
     {
-        printf("not found\n");
         evhttp_send_error(req, HTTP_NOTFOUND, 0);
         return;
     } 
     fflush(stdout);
-    printf("%s\n", filepath);
     
-    if (isfile(filepath, findpath))
-    {   
-        printf("%s\n", findpath);
-        FILE *f = fopen(filepath,"r");
-        if (NULL == f)
+
+    if (is_dir(filepath))
+    {
+        // list all the files;
+        struct evbuffer *buff = evbuffer_new();
+        struct evkeyvalq *output_header_kvq = evhttp_request_get_output_headers(req);
+        evhttp_add_header(output_header_kvq, "Content-Type", "text/html");
+        evbuffer_add_printf(buff,   "<!DOCTYPE html>\
+                                     <html>\
+                                    <head>\
+                                    <meta charset=\"utf-8\" />\
+                                    <title>Download</title>\
+                                    </head>\
+                                    <body>");
+        evbuffer_add_printf(buff, "<h1>Directory listing of %s</h1>", filepath);
+        DIR *dir = opendir(filepath);
+        struct dirent *entry;
+        if (dir == NULL)
         {
-            fprintf(stderr,"%s\n","there is no file here");
-            evhttp_send_error(req, HTTP_NOTFOUND, 0);
-            return;
+            printf("%s\n", "Opendir error！");
         }
-        int fd = fileno(f);
-        // TODO: judge Connections state
+       while ((entry = readdir(dir))) {
+			const char *name = entry->d_name;
+			evbuffer_add_printf(buff,
+			    "    <li><a href=\"%s\">%s</a>\n",
+			    name, name);/* XXX escape this */
+
+		}
+        
+        evbuffer_add_printf(buff, "</body>\n</html>");
+        evhttp_send_reply(req, HTTP_OK, "OK", buff);
+        free(entry);
+    }
+
+    else
+    {   
         struct evbuffer *evb = evbuffer_new();
+        struct evkeyvalq* outHeader_kvq = evhttp_request_get_output_headers(req);
         if (!evb)
         {
             fprintf(stderr, "Couldn't create buffer\n");
             return;
         }
-        struct evkeyvalq* outHeader_kvq = evhttp_request_get_output_headers(req);
-        // struct evkeyvalq* inHeader = evhttp_request_get_input_headers(req);
-        // const char* linktype = evhttp_find_header(inHeader, "Connection");
+        FILE *f = fopen(filepath,"r");
+        if (NULL == f)
+        {
+            fprintf(stderr,"%s\n","there is no file here");
+            evhttp_send_error(req, HTTP_NOTFOUND, 0);
+            evbuffer_free(evb);
+            return;
+        }
+        int fd = fileno(f);
+        // TODO: judge Connections state
+        
+        struct evkeyvalq* inHeader = evhttp_request_get_input_headers(req);
+        const char* linktype = evhttp_find_header(inHeader, "Connection");
+        if (strcasecmp(linktype, "keep-alive") != 0 || DOWNLOAD_FILE_CHUNK_OPTION == 0)
+        {
+        // No keep-alive or not to use chunk
+        // normal transfer
         // judge to choose the chunk tansmission or whole file
         // if (DOWNLOAD_FILE_IN_CHUNK)
         evbuffer_add_file(evb,fd,0,getfileSize(filepath));
         // 指定下载编码格式
         evhttp_add_header(outHeader_kvq, "Content-Type", "application/octet-stream");
-        printf("%s\n", "download success.");
         evhttp_send_reply(req, HTTP_OK, "OK", evb);
         evbuffer_free(evb);
         fclose(f);
+        evhttp_add_header(outHeader_kvq, "Connection", "close");
+        }
+        else{
+                    // 指定下载编码格式
+            evhttp_add_header(outHeader_kvq, "Content-Type", "application/octet-stream");
+            evhttp_send_reply(req, HTTP_OK, "OK", evb);
+            int file_size=getfileSize(filepath);
+            size_t num_chunk = (getfileSize(file_size) + CHUNK_SIZE - 1) / CHUNK_SIZE; // To ensure that at least one chunk
+            evhttp_send_reply_start(req, HTTP_OK, "OK");
+            // 前 n - 1 个chunk是完整的
+            for (int i = 0; i < num_chunk - 1; i++)
+            {
+                struct evbuffer *buff = evbuffer_new();
+                struct evbuffer_file_segment *file_seg = evbuffer_file_segment_new(fd, i * CHUNK_SIZE, CHUNK_SIZE, NULL);
+                evbuffer_add_file_segment(buff, file_seg, 0, CHUNK_SIZE);
+                evhttp_send_reply_chunk(req, buff);
+                evbuffer_free(buff);
+            }
+            struct evbuffer *buff = evbuffer_new();
+            struct evbuffer_file_segment *file_seg = evbuffer_file_segment_new(fd, (num_chunk - 1) * CHUNK_SIZE, file_size - (num_chunk - 1) * CHUNK_SIZE, NULL);
+            evbuffer_add_file_segment(buff, file_seg, 0, file_size - (num_chunk - 1) * CHUNK_SIZE);
+            evhttp_send_reply_chunk(req, buff);
+            evbuffer_free(buff);
+            evhttp_send_reply_end(req);
+        }
     }
-    else
-    {
-        evhttp_send_error(req, HTTP_NOTFOUND, 0);
-    }
+    return;
 }
 
 void general_dispatch(struct evhttp_request *req, void *args)
 {
     const char* uri = evhttp_request_get_uri(req);
+
     if (strstr(uri, "/download"))
     {
         do_download_file(req,args);
@@ -528,8 +601,7 @@ static int serve_some_http(void)
     server_setup_certs(ctx, certificate_chain, private_key);
 
     /* This is the magic that lets evhttp use SSL. */
-    // evhttp_set_bevcb(http, bevcb, ctx);
-
+    evhttp_set_bevcb(http, bevcb, ctx);
     /* This is the callback that gets called when a request comes in. */
     evhttp_set_gencb(http, general_dispatch, NULL);
 
