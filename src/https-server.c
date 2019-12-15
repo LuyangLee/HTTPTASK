@@ -528,7 +528,7 @@ static int serve_some_http(void)
     server_setup_certs(ctx, certificate_chain, private_key);
 
     /* This is the magic that lets evhttp use SSL. */
-    // evhttp_set_bevcb(http, bevcb, ctx);
+    evhttp_set_bevcb(http, bevcb, ctx);
 
     /* This is the callback that gets called when a request comes in. */
     evhttp_set_gencb(http, general_dispatch, NULL);
