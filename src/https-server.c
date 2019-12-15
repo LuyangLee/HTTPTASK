@@ -36,7 +36,7 @@
 #include <event2/util.h>
 #include <event2/keyvalq_struct.h>
 #include "https-common.h"
-#include "template.h"
+
 
 #ifdef EVENT__HAVE_NETINET_IN_H
 #include <netinet/in.h>
@@ -53,6 +53,8 @@
 #endif
 
 
+#define UPLOAD_PATH "../file/"
+
 unsigned short serverPort = COMMON_HTTPS_PORT;
 char uri_root[512];
 /* Instead of casting between these types, create a union with all of them,
@@ -63,6 +65,7 @@ typedef union {
     struct sockaddr_in in;      //IPv4
     struct sockaddr_in6 i6;     //IPv6
 } sock_hop;
+
 
 /* This callback gets invoked when we get any http request that doesn't match
  * any other callback.  Like any evhttp server callback, it has a simple job:
@@ -77,12 +80,9 @@ void do_download_file(struct evhttp_request *req, void *args);
 void general_dispatch(struct evhttp_request *req, void *args);
 int get_filename(const char* uri, char *file);
 int isfile(const char *filepath, char * findname);
+int save_file(char *path, char *file_name, char *file_content, size_t file_length);
 
-void upload_get(struct evhttp_request *req, void *args);
-void upload_post(struct evhttp_request *req, void *args);
 
-void download_post(struct evhttp_request *req, void *args);
-int is_uri_begin_with(const char *uri,const char *s);
 // 处理get和post的回调方法 //
 // GET方法中的查询字符串（键值对）实际上是从URI中获得的
 void deal_get(struct evhttp_request *req, void *args)
@@ -111,15 +111,13 @@ void deal_get(struct evhttp_request *req, void *args)
     evbuffer_add_printf(evb, "You have sent a GET request to the server\r\n");
     evbuffer_add_printf(evb, "Request URI: %s\r\n", uri);
     //upload
-    if(is_uri_begin_with(uri,"/upload")==0){
-        upload_get(req,args);
-    }else{
-        for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
-        {
-            evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
-        }
-        evhttp_send_reply(req, HTTP_OK, "OK", evb);
+
+    for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
+    {
+        evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
     }
+    evhttp_send_reply(req, HTTP_OK, "OK", evb);
+
 
     if(evb)
         evbuffer_free(evb);
@@ -163,34 +161,29 @@ void deal_post(struct evhttp_request *req, void *args)
 //        evhttp_send_error(req, HTTP_BADREQUEST, 0);
 //        return;
 //    }
-    if (is_uri_begin_with(uri,"/upload") == 0){
-        upload_post(req,args);
-    }else if(is_uri_begin_with(uri,"/download")==0){
-        download_post(req,args);
-    }else{
-        evbuffer_add_printf(evb, "You have sent a POST request to the server\r\n");
-        evbuffer_add_printf(evb, "Request URI: %s\r\n", uri);
-        for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
-        {
-            evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
-        }
-        evhttp_send_reply(req, HTTP_OK, "OK", evb);
+
+    evbuffer_add_printf(evb, "You have sent a POST request to the server\r\n");
+    evbuffer_add_printf(evb, "Request URI: %s\r\n", uri);
+    for (struct evkeyval *head = kvs.tqh_first; head != NULL; head = head->next.tqe_next)
+    {
+        evbuffer_add_printf(evb, "%s=%s\r\n", head->key, head->value);
     }
+    evhttp_send_reply(req, HTTP_OK, "OK", evb);
+
     if(evb)
         evbuffer_free(evb);
 }
 
-int is_uri_begin_with(const char *uri,const char *s){
-    int len = strlen(s);
-    int same = 0;
-    for(int i=0;i<len;i++){
-        if(uri[i]!=s[i]){
-            same = -1;
-            break;
-        }
+void do_upload_cb(struct evhttp_request *req, void *args){
+    //For GET, return a HTML file, which will lead to a post
+    if(evhttp_request_get_command(req) == EVHTTP_REQ_GET){
+        upload_get(req,args);
+    }else if(evhttp_request_get_command(req) == EVHTTP_REQ_POST){
+        upload_post(req,args);
     }
-    return same;
 }
+
+
 void dump(struct evhttp_request *req, void *args)
 {
     struct evbuffer *evb = evbuffer_new();
@@ -299,20 +292,191 @@ void upload_get(struct evhttp_request *req, void *args){
         fprintf(stderr, "Couldn't create buffer\n");
         return;
     }
-    evbuffer_add_printf(evb, UPLOAD_HTML_TEMPLATE);
+    //read html/upload.html
+    FILE *fp = fopen("../html/file_upload_page.html","r");
+    // read content
+    if (fp != NULL) {
+        /* Get the number of bytes */
+        fseek(fp, 0L, SEEK_END);
+        int numbytes = ftell(fp);
+        /* reset the file position indicator to the beginning of the file */
+        fseek(fp, 0L, SEEK_SET);
+        /* grab sufficient memory for the buffer to hold the text */
+        char* buff = (char*)calloc(numbytes, sizeof(char));
+        /* memory error */
+        if(buff == NULL)
+            return ;
+        fread(buff, sizeof(char), numbytes, fp);
+        if ( ferror( fp ) != 0 ) {
+            fputs("Error reading file", stderr);
+        }
+        fclose(fp);
+        printf("%s",buff);
+        evbuffer_add(evb,buff,numbytes);
+    }
+
     evhttp_send_reply(req, HTTP_OK, "OK", evb);
-    evbuffer_free(evb);
+    if(evb)
+        evbuffer_free(evb);
+}
+char* test_fun( char *s1, char *s2, size_t len1){
+    int len2;
+    if (!(len2 = strlen(s2))) //此种情况下s2不能指向空，否则strlen无法测出长度，这条语句错误
+        return s1;
+    for (int i = 0; i < len1; i++)
+    {
+        if (s1[i] == *s2 && strncmp(s1 + i, s2, len2) == 0)
+            return (s1 + i);
+    }
+    return NULL;
+}
+//
+char * get_filename_from_buffer(const char *data, int *len)
+{
+    // get file name from data, return the address of beginning of filename and store length in len
+    char *begin = strstr(data, "filename=\"") + 10;
+    char *end = strstr(begin, "\"");
+    *len = end - begin;
+    return begin;
+}
+char *get_formdata_path(const char *data, int *len, size_t data_length)
+{
+    // get request path from data, return the address of beginning of path and store length in len
+    char *begin = test_fun(data, "name=\"path\"", data_length) + 11; // 11 for name="path"
+    begin = strstr(begin, "/");                                     // begin = '/'
+    char *end = strstr(begin, "\r\n");                              //end = '\n'
+    *len = end - begin;
+    char path[*len + 1];
+    memcpy(path, begin, *len);
+    printf("Len:%d", *len);
+    path[*len] = 0;
+    printf("Path:%s", path);
+    fflush(stdout);
+    return begin;
 }
 
+char *get_formdata_content(const char *data, size_t *len, size_t data_length)
+{
+    int boundary_size = strstr(data, "\n") - data;
+    char boundary[boundary_size + 1];
+    memcpy(boundary, data, boundary_size);
+    boundary[boundary_size] = '\0';
+    char *begin = strstr(data, "Content-Type");
+    begin = strstr(begin, "\n");
+
+    begin = strstr(begin + 1, "\n") + 1;
+    size_t bd = data_length - (begin - data);
+    char *end = test_fun(begin, boundary, bd);
+    *len = end - begin;
+
+    printf("Content-Len:%ld", *len);
+    fflush(stdout);
+
+    return begin;
+}
+int has_file(char *path)
+{
+    // to judge if a file exists
+    if (access(path, F_OK) != -1)
+    {
+        return 1;
+    }
+    return 0;
+}
+
+int mkdir_p(char *dir, mode_t m)
+{
+    char shell[200];
+    strcpy(shell, "mkdir -p");
+    strcat(shell, " ");
+    strcat(shell, dir);
+    system(shell);
+    return 0;
+}
+
+
+//
+int save_file(char *path, char *file_name, char *file_content, size_t file_length)
+{
+
+    char file_path[100];
+    strcpy(file_path, UPLOAD_PATH);
+    strcat(file_path, path);
+    if (!has_file(file_path))
+    {
+        mkdir_p(file_path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    }
+    strcat(file_path, "/");
+    strcat(file_path, file_name);
+    printf("File Path:%s", file_path);
+    fflush(stdout);
+    if (has_file(file_path))
+    {
+        return 0;
+    }
+    else
+    {
+        FILE *fp = fopen(file_path, "w+");
+        printf("opened");
+
+        if (fp == NULL)
+        {
+            printf("Error");
+            fflush(stdout);
+        }
+        for (int i = 0; i < file_length; i++)
+        {
+            fputc(file_content[i], fp);
+        }
+        fclose(fp);
+        return 1;
+    }
+}
 void upload_post(struct evhttp_request *req, void *args){
-    struct evbuffer *evb = evbuffer_new();
-    evbuffer_add_printf(evb,"Hello there!");
-    evhttp_send_reply(req, HTTP_OK, "OK", evb);
-    evbuffer_free(evb);
+    // data store in input_buffer
+    struct evbuffer* req_buff = evhttp_request_get_input_buffer(req);
+    size_t buffer_length = evbuffer_get_length(evhttp_request_get_input_buffer(req));
+    printf("Buffer-Length: %ld\n", buffer_length);
+    char *input_buffer = (char*)malloc(sizeof(char)*buffer_length);
+    evbuffer_remove(req_buff,input_buffer, sizeof(char)*buffer_length);
+
+    //save to file
+    struct evbuffer *buff = evbuffer_new();
+    // File name
+    int file_name_len;
+    char *file_name_begin = get_filename_from_buffer(input_buffer, &file_name_len);
+    char *file_name = (char*)malloc(sizeof(char)*(file_name_len+1));
+    memcpy(file_name, file_name_begin, file_name_len);
+    file_name[file_name_len] = '\0';
+    // File content
+    size_t file_content_len = 0;
+    char *file_content_begin = get_formdata_content(input_buffer, &file_content_len, buffer_length);
+    printf("Content-Length:%ld", file_content_len);
+    fflush(stdout);
+    char *file_content = malloc(file_content_len + 1);
+    memcpy(file_content, file_content_begin, file_content_len);
+    file_content[file_content_len] = '\0';
+    fflush(stdout);
+    // Path
+    int file_path_len;
+
+    char *file_path_begin = get_formdata_path(input_buffer, &file_path_len, buffer_length);
+    char file_path[file_path_len + 1];
+    memcpy(file_path, file_path_begin, file_path_len);
+    file_path[file_path_len] = '\0';
+    printf("%s\n", "start to save");
+    fflush(stdout);
+    int res = save_file(file_path, file_name, file_content, file_content_len);
+    if (res)
+    {
+        evhttp_send_reply(req, HTTP_OK, "OK", buff);
+    }
+    else
+    {
+        evhttp_send_reply(req, HTTP_BADREQUEST, "Fail", buff);
+    }
 }
 
-void download_post(struct evhttp_request *req, void *args){
-}
 
 
 void do_download_file(struct evhttp_request *req, void *args)
@@ -604,7 +768,7 @@ static int serve_some_http(void)
     evhttp_set_bevcb(http, bevcb, ctx);
     /* This is the callback that gets called when a request comes in. */
     evhttp_set_gencb(http, general_dispatch, NULL);
-
+    evhttp_set_cb(http,"/upload",do_upload_cb,NULL);
     /* Now we tell the evhttp what port to listen on */
     //设置监听端口
     handle = evhttp_bind_socket_with_handle(http, "0.0.0.0", serverPort);
