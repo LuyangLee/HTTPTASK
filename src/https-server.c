@@ -71,7 +71,7 @@
 #define O_RDONLY _O_RDONLY
 #endif
 
-#define UPLOAD_PATH "./file"
+#define UPLOAD_PATH "../file/"
 unsigned short serverPort = COMMON_HTTPS_PORT;
 char uri_root[512];
 /* Instead of casting between these types, create a union with all of them,
@@ -262,17 +262,12 @@ char* test_fun( char *s1, char *s2, size_t len1){
     return NULL;
 }
 //
-char *get_formdata_filename(const char *data, int *len)
+char * get_filename_from_buffer(const char *data, int *len)
 {
-    // get file name from data, return the address of beginning of filenamr and store length in len
+    // get file name from data, return the address of beginning of filename and store length in len
     char *begin = strstr(data, "filename=\"") + 10;
     char *end = strstr(begin, "\"");
     *len = end - begin;
-    char file_name[*len + 1];
-    memcpy(file_name, begin, *len);
-    file_name[*len] = 0;
-    printf("Filename: %s\n", file_name);
-    fflush(stdout);
     return begin;
 }
 char *get_formdata_path(const char *data, int *len, size_t data_length)
@@ -369,21 +364,19 @@ int save_file(char *path, char *file_name, char *file_content, size_t file_lengt
     }
 }
 void upload_post(struct evhttp_request *req, void *args){
-
-    // file upload post handler
-    // Actual upload process
+    // data store in input_buffer
     struct evbuffer* req_buff = evhttp_request_get_input_buffer(req);
-
     size_t buffer_length = evbuffer_get_length(evhttp_request_get_input_buffer(req));
     printf("Buffer-Length: %ld\n", buffer_length);
     char *input_buffer = (char*)malloc(sizeof(char)*buffer_length);
     evbuffer_remove(req_buff,input_buffer, sizeof(char)*buffer_length);
-    // Data stored in input_buffer, resolve it and save to file
+
+    //save to file
     struct evbuffer *buff = evbuffer_new();
     // File name
     int file_name_len;
-    char *file_name_begin = get_formdata_filename(input_buffer, &file_name_len);
-    char file_name[file_name_len + 1];
+    char *file_name_begin = get_filename_from_buffer(input_buffer, &file_name_len);
+    char *file_name = (char*)malloc(sizeof(char)*(file_name_len+1));
     memcpy(file_name, file_name_begin, file_name_len);
     file_name[file_name_len] = '\0';
     // File content
