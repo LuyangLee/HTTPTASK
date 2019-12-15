@@ -324,33 +324,34 @@ void do_download_file(struct evhttp_request *req, void *args)
     } 
     fflush(stdout);
     printf("%s\n", filepath);
+    
     if (isfile(filepath, findpath))
     {   
-        struct evbuffer *evb = evbuffer_new();
-        struct evkeyvalq* outHeader_kvq = evhttp_request_get_output_headers(req);
-        if (!evb)
-        {
-            fprintf(stderr, "Couldn't create buffer\n");
-            return;
-        }
+        printf("%s\n", findpath);
         FILE *f = fopen(filepath,"r");
         if (NULL == f)
         {
             fprintf(stderr,"%s\n","there is no file here");
             evhttp_send_error(req, HTTP_NOTFOUND, 0);
-            evbuffer_free(evb);
             return;
         }
         int fd = fileno(f);
         // TODO: judge Connections state
-        struct evkeyvalq* inHeader = evhttp_request_get_input_headers(req);
-        const char* linktype = evhttp_find_header(inHeader, "Connection");
+        struct evbuffer *evb = evbuffer_new();
+        if (!evb)
+        {
+            fprintf(stderr, "Couldn't create buffer\n");
+            return;
+        }
+        struct evkeyvalq* outHeader_kvq = evhttp_request_get_output_headers(req);
+        // struct evkeyvalq* inHeader = evhttp_request_get_input_headers(req);
+        // const char* linktype = evhttp_find_header(inHeader, "Connection");
         // judge to choose the chunk tansmission or whole file
         // if (DOWNLOAD_FILE_IN_CHUNK)
         evbuffer_add_file(evb,fd,0,getfileSize(filepath));
         // 指定下载编码格式
         evhttp_add_header(outHeader_kvq, "Content-Type", "application/octet-stream");
-        printf('%s\n', "download success.");
+        printf("%s\n", "download success.");
         evhttp_send_reply(req, HTTP_OK, "OK", evb);
         evbuffer_free(evb);
         fclose(f);
